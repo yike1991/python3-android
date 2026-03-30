@@ -1,0 +1,260 @@
+name: Build Python for Android
+
+on:
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    name: Build Python 3.11.9 for Android (ARM64)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential pkg-config libssl-dev libffi-dev zlib1g-dev
+
+    - name: Download Android NDK r25c
+      run: |
+        echo "Downloading Android NDK r25c..."
+        wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+        echo "Extracting NDK..."
+        unzip -q android-ndk-r25c-linux.zip
+        echo "ANDROID_NDK_ROOT=$GITHUB_WORKSPACE/android-ndk-r25c" >> $GITHUB_ENV
+        echo "NDK downloaded successfully"
+        ls -la $ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/
+
+    - name: Download Python 3.11.9 source
+      run: |
+        echo "Downloading Python 3.11.9 source..."
+        wget -q https://www.python.org/ftp/python/3.11.9/Python-3.11.9.tgz
+        echo "Extracting Python source..."
+        tar -xzf Python-3.11.9.tgz
+        echo "Python source ready"
+
+    - name: Build host Python 3.11
+      run: |
+        echo "=========================================="
+        echo "Stage 1: Building host Python 3.11"
+        echo "=========================================="
+        mkdir -p build/host
+        cd build/host
+        ../../Python-3.11.9/configure --prefix=$GITHUB_WORKSPACE/build/python-host --enable-optimizations
+        make -j$(nproc)
+        make install
+        export PYTHON_FOR_BUILD=$GITHUB_WORKSPACE/build/python-host/bin/python3.11
+        echo "PYTHON_FOR_BUILD=$PYTHON_FOR_BUILD" >> $GITHUB_ENV
+        $PYTHON_FOR_BUILD --version
+        echo "Host Python built successfully"
+
+    - name: Build Android Python (ARM64, API 21)
+      run: |
+        echo "=========================================="
+        echo "Stage 2: Cross-compiling for Android"
+        echo "=========================================="
+        export ARCH=aarch64
+        export TARGET_TRIPLE=aarch64-linux-android
+        export ANDROID_API=21
+        export TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
+
+        echo "Configuring environment..."
+        export CC="$TOOLCHAIN/bin/${TARGET_TRIPLE}${ANDROID_API}-clang"
+        export CXX="$TOOLCHAIN/bin/${TARGET_TRIPLE}${ANDROID_API}-clang++"
+        export AR="$TOOLCHAIN/bin/llvm-ar"
+        export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+        export STRIP="$TOOLCHAIN/bin/llvm-strip"
+        export LD="$TOOLCHAIN/bin/ld.lld"
+        export PATH="$TOOLCHAIN/bin:$PATH"
+
+        export CFLAGS="-fPIC --sysroot=$TOOLCHAIN/sysroot -D__ANDROID_API__=$ANDROID_API"
+        export CXXFLAGS="$CFLAGS"
+        export LDFLAGS="-L$TOOLCHAIN/sysroot/usr/lib -lm"
+        export CPPFLAGS="--sysroot=$TOOLCHAIN/sysroot -D__ANDROID_API__=$ANDROID_API"
+
+        echo "Build configuration:"
+        echo "  Target: $TARGET_TRIPLE (ARM64)"
+        echo "  API Level: $ANDROID_API"
+        echo "  Compiler: $CC"
+        echo "  Host Python: $PYTHON_FOR_BUILD"
+
+        # Clean and prepare
+        rm -rf build/android install
+        mkdir -p build/android install/python-android
+
+        echo "Configuring Python for Android..."
+        cd build/android
+        ../../Python-3.11.9/configure \
+          --prefix=$GITHUB_WORKSPACE/install/python-android \
+          --host=$TARGET_TRIPLE \
+          --build=x86_64-linux-gnu \
+          --with-build-python=$PYTHON_FOR_BUILD \
+          --enable-shared \
+          --disable-ipv6 \
+          --disable-test-modules \
+          --without-ensurepip \
+          --with-system-ffi \
+          ac_cv_file__dev_ptmx=no \
+          ac_cv_file__dev_ptc=no \
+          ac_cv_func_getpgrp_void=yes \
+          ac_cv_func_setpgrp_void=yes \
+          ac_cv_func_getpwent=no \
+          ac_cv_func_getpwuid=no \
+          ac_cv_func_getpwnam=no \
+          ac_cv_func_getspnam=no \
+          ac_cv_func_setpgrp=no \
+          ac_cv_func_initgroups=no \
+          ac_cv_func_getgroups=no \
+          ac_cv_func_waitpid=no \
+          ac_cv_func_getaddrinfo=no \
+          ac_cv_func_getnameinfo=no \
+          ac_cv_func_gethostbyname_r=no \
+          ac_cv_func_gethostbyaddr_r=no \
+          ac_cv_func_gethostbyname2_r=no \
+          ac_cv_func_gethostbyaddr2_r=no \
+          ac_cv_func_gethostent_r=no \
+          ac_cv_func_gethostent=no \
+          ac_cv_func_getprotobyname_r=no \
+          ac_cv_func_getprotobynumber_r=no \
+          ac_cv_func_getprotoent_r=no \
+          ac_cv_func_getprotoent=no \
+          ac_cv_func_getservbyname_r=no \
+          ac_cv_func_getservbyport_r=no \
+          ac_cv_func_getservent_r=no \
+          ac_cv_func_getservent=no \
+          ac_cv_func_getnetbyname_r=no \
+          ac_cv_func_getnetbyaddr_r=no \
+          ac_cv_func_getnetent_r=no \
+          ac_cv_func_getnetent=no \
+          ac_cv_func_getnetbyname=no \
+          ac_cv_func_getnetbyaddr=no \
+          ac_cv_func_chflags=no \
+          ac_cv_func_lchflags=no \
+          ac_cv_func_mkfifo=no \
+          ac_cv_func_mknod=no \
+          ac_cv_func_mktime=no \
+          ac_cv_func_plock=no \
+          ac_cv_func_sethostname=no \
+          ac_cv_func_sigwait=no \
+          ac_cv_func_sigwaitinfo=no \
+          ac_cv_func_sigtimedwait=no \
+          ac_cv_func_strftime=no \
+          ac_cv_func_timegm=no \
+          ac_cv_func_timelocal=no \
+          ac_cv_func_utimes=no \
+          ac_cv_func_fdopendir=no \
+          ac_cv_func_getgrgid=no \
+          ac_cv_func_getgrnam=no \
+          ac_cv_func_getgrouplist=no \
+          ac_cv_func_initgroups=no \
+          ac_cv_func_mkdirat=no \
+          ac_cv_func_mkfifoat=no \
+          ac_cv_func_mknodat=no \
+          ac_cv_func_openat=no \
+          ac_cv_func_fchmodat=no \
+          ac_cv_func_fchownat=no \
+          ac_cv_func_fstatat=no \
+          ac_cv_func_unlinkat=no \
+          ac_cv_func_renameat=no \
+          ac_cv_func_linkat=no \
+          ac_cv_func_symlinkat=no \
+          ac_cv_func_readlinkat=no \
+          ac_cv_func_faccessat=no \
+          ac_cv_py_format_size_t=no \
+          ac_cv_have_long_long_format=yes
+
+        echo "Compiling Python (using $(nproc) threads)..."
+        make -j$(nproc)
+
+        echo "Installing Python..."
+        make install
+
+        echo "Stripping binaries..."
+        $STRIP --strip-unneeded $GITHUB_WORKSPACE/install/python-android/bin/python3.11
+        find $GITHUB_WORKSPACE/install/python-android/lib -name "*.so*" -type f -exec $STRIP --strip-unneeded {} \;
+
+        echo "Build completed!"
+
+    - name: Verify build
+      run: |
+        echo "=========================================="
+        echo "Verifying build output"
+        echo "=========================================="
+        echo ""
+        echo "Python binary:"
+        ls -lh install/python-android/bin/python3.11
+        file install/python-android/bin/python3.11
+        echo ""
+        echo "Python shared library:"
+        ls -lh install/python-android/lib/libpython3.11.so
+        echo ""
+        echo "Standard library:"
+        ls install/python-android/lib/python3.11/ | head -20
+        echo ""
+        echo "Checking for frozen modules..."
+        if strings install/python-android/bin/python3.11 | grep -q "importlib._bootstrap"; then
+          echo "✅ SUCCESS: Frozen modules embedded correctly!"
+        else
+          echo "⚠️  WARNING: Frozen modules may not be properly embedded"
+        fi
+        echo ""
+        echo "Checking critical files..."
+        [ -f "install/python-android/lib/python3.11/importlib/_bootstrap.py" ] && echo "✅ _bootstrap.py exists" || echo "❌ _bootstrap.py missing"
+        [ -f "install/python-android/lib/python3.11/sysconfig.py" ] && echo "✅ sysconfig.py exists" || echo "❌ sysconfig.py missing"
+
+    - name: Package artifacts
+      run: |
+        cd install
+        tar -czf python3-android-arm64-api21.tar.gz python-android/
+        echo "Package size:"
+        ls -lh python3-android-arm64-api21.tar.gz
+
+    - name: Upload Python binary
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-android-binary
+        path: install/python-android/bin/python3.11
+        retention-days: 30
+
+    - name: Upload Python library
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-android-library
+        path: install/python-android/lib/
+        retention-days: 30
+
+    - name: Upload complete package
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-android-complete
+        path: install/python-android/
+        retention-days: 30
+
+    - name: Upload tarball
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-android-tarball
+        path: install/python3-android-arm64-api21.tar.gz
+        retention-days: 30
+
+    - name: Build summary
+      run: |
+        echo "=========================================="
+        echo "Build completed successfully!"
+        echo "=========================================="
+        echo ""
+        echo "Download artifacts from:"
+        echo "https://github.com/yike1991/python3-android/actions"
+        echo ""
+        echo "Artifacts available:"
+        echo "  - python-android-binary (Python interpreter)"
+        echo "  - python-android-library (Libraries and stdlib)"
+        echo "  - python-android-complete (Full package)"
+        echo "  - python-android-tarball (Compressed archive)"
