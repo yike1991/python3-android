@@ -1,127 +1,127 @@
 name: Build Python for Android
-  现在去 Actions 页面触发构建吧！
-  on:
-    workflow_dispatch:
-  1. 点击仓库顶部的 "Actions" 标签
-  jobs:击 "Run workflow" 按钮
-    build:行
-      runs-on: ubuntu-latest
-  完成后告诉我：
-      steps:始" 或 "正在运行"
-      - name: Checkout code错误信息
-        uses: actions/checkout@v4
-  然后我们会等待构建完成（约15-20分钟），你可以随时回来查看进度！
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-  [×] 创建 GitHub 仓库
-      - name: Install build dependencies
-        run: |tHub Actions 工作流文件
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libssl-dev libffi-dev zlib1g-dev
-  [ ] 验证并测试编译的 Python
-      - name: Download Android NDK r25c
-        run: |─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-          echo "Downloading Android NDK r25c..."
-          wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-          unzip -q android-ndk-r25c-linux.zip
-          echo "ANDROID_NDK_ROOT=$GITHUB_WORKSPACE/android-ndk-r25c" >> $GITHUB_ENV
 
-      - name: Download Python 3.11.9 source
-        run: |
-          echo "Downloading Python 3.11.9..."
-          wget -q https://www.python.org/ftp/python/3.11.9/Python-3.11.9.tgz
-          tar -xzf Python-3.11.9.tgz
+on:
+  workflow_dispatch:
 
-      - name: Build host Python 3.11
-        run: |
-          echo "=========================================="
-          echo "Stage 1: Building host Python 3.11"
-          echo "=========================================="
-          mkdir -p build/host
-          cd build/host
-          ../../Python-3.11.9/configure --prefix=$GITHUB_WORKSPACE/build/python-host --enable-optimizations
-          make -j$(nproc)
-          make install
-          echo "PYTHON_FOR_BUILD=$GITHUB_WORKSPACE/build/python-host/bin/python3.11" >> $GITHUB_ENV
-          $GITHUB_WORKSPACE/build/python-host/bin/python3.11 --version
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-      - name: Build Android Python (ARM64)
-        run: |
-          echo "=========================================="
-          echo "Stage 2: Cross-compiling for Android"
-          echo "=========================================="
-          export ARCH=aarch64
-          export TARGET_TRIPLE=aarch64-linux-android
-          export ANDROID_API=21
-          export TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-          export CC="$TOOLCHAIN/bin/${TARGET_TRIPLE}${ANDROID_API}-clang"
-          export CXX="$TOOLCHAIN/bin/${TARGET_TRIPLE}${ANDROID_API}-clang++"
-          export AR="$TOOLCHAIN/bin/llvm-ar"
-          export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
-          export STRIP="$TOOLCHAIN/bin/llvm-strip"
-          export LD="$TOOLCHAIN/bin/ld.lld"
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
 
-          export CFLAGS="-fPIC --sysroot=$TOOLCHAIN/sysroot -D__ANDROID_API__=$ANDROID_API"
-          export CXXFLAGS="$CFLAGS"
-          export LDFLAGS="-L$TOOLCHAIN/sysroot/usr/lib -lm"
-          export CPPFLAGS="--sysroot=$TOOLCHAIN/sysroot -D__ANDROID_API__=$ANDROID_API"
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential pkg-config libssl-dev libffi-dev zlib1g-dev
 
-          rm -rf build/android install
-          mkdir -p build/android install/python-android
+    - name: Download Android NDK r25c
+      run: |
+        echo "Downloading Android NDK r25c..."
+        wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+        unzip -q android-ndk-r25c-linux.zip
+        echo "ANDROID_NDK_ROOT=$GITHUB_WORKSPACE/android-ndk-r25c" >> $GITHUB_ENV
 
-          cd build/android
-          ../../Python-3.11.9/configure \
-            --prefix=$GITHUB_WORKSPACE/install/python-android \
-            --host=$TARGET_TRIPLE \
-            --build=x86_64-linux-gnu \
-            --with-build-python=$PYTHON_FOR_BUILD \
-            --enable-shared \
-            --disable-ipv6 \
-            --disable-test-modules \
-            --without-ensurepip \
-            --with-system-ffi \
-            ac_cv_func_getpgrp_void=yes \
-            ac_cv_func_setpgrp_void=yes || cat config.log
+    - name: Download Python 3.11.9 source
+      run: |
+        echo "Downloading Python 3.11.9..."
+        wget -q https://www.python.org/ftp/python/3.11.9/Python-3.11.9.tgz
+        tar -xzf Python-3.11.9.tgz
 
-          make -j$(nproc)
-          make install
+    - name: Build host Python 3.11
+      run: |
+        echo "=========================================="
+        echo "Stage 1: Building host Python 3.11"
+        echo "=========================================="
+        mkdir -p build/host
+        cd build/host
+        ../../Python-3.11.9/configure --prefix=$GITHUB_WORKSPACE/build/python-host --enable-optimizations
+        make -j$(nproc)
+        make install
+        echo "PYTHON_FOR_BUILD=$GITHUB_WORKSPACE/build/python-host/bin/python3.11" >> $GITHUB_ENV
+        $GITHUB_WORKSPACE/build/python-host/bin/python3.11 --version
 
-          $STRIP --strip-unneeded $GITHUB_WORKSPACE/install/python-android/bin/python3.11
-          find $GITHUB_WORKSPACE/install/python-android/lib -name "*.so*" -exec $STRIP --strip-unneeded {} \;
+    - name: Build Android Python (ARM64)
+      run: |
+        echo "=========================================="
+        echo "Stage 2: Cross-compiling for Android"
+        echo "=========================================="
+        export ARCH=aarch64
+        export TARGET_TRIPLE=aarch64-linux-android
+        export ANDROID_API=21
+        export TOOLCHAIN=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
 
-      - name: Verify build
-        run: |
-          echo "=========================================="
-          echo "Build Verification"
-          echo "=========================================="
-          ls -lh install/python-android/bin/python3.11
-          file install/python-android/bin/python3.11
-          ls -lh install/python-android/lib/libpython3.11.so
+        export CC="$TOOLCHAIN/bin/${TARGET_TRIPLE}${ANDROID_API}-clang"
+        export CXX="$TOOLCHAIN/bin/${TARGET_TRIPLE}${ANDROID_API}-clang++"
+        export AR="$TOOLCHAIN/bin/llvm-ar"
+        export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+        export STRIP="$TOOLCHAIN/bin/llvm-strip"
+        export LD="$TOOLCHAIN/bin/ld.lld"
 
-          if strings install/python-android/bin/python3.11 | grep -q "importlib._bootstrap"; then
-            echo "✅ Frozen modules embedded correctly!"
-          else
-            echo "⚠️  Warning: Frozen modules may not be embedded"
-          fi
+        export CFLAGS="-fPIC --sysroot=$TOOLCHAIN/sysroot -D__ANDROID_API__=$ANDROID_API"
+        export CXXFLAGS="$CFLAGS"
+        export LDFLAGS="-L$TOOLCHAIN/sysroot/usr/lib -lm"
+        export CPPFLAGS="--sysroot=$TOOLCHAIN/sysroot -D__ANDROID_API__=$ANDROID_API"
 
-      - name: Create tarball
-        run: |
-          cd install
-          tar -czf python3-android-arm64.tar.gz python-android/
+        rm -rf build/android install
+        mkdir -p build/android install/python-android
 
-      - name: Upload complete package
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-android-complete
-          path: install/python-android/
-          retention-days: 30
+        cd build/android
+        ../../Python-3.11.9/configure \
+          --prefix=$GITHUB_WORKSPACE/install/python-android \
+          --host=$TARGET_TRIPLE \
+          --build=x86_64-linux-gnu \
+          --with-build-python=$PYTHON_FOR_BUILD \
+          --enable-shared \
+          --disable-ipv6 \
+          --disable-test-modules \
+          --without-ensurepip \
+          --with-system-ffi \
+          ac_cv_func_getpgrp_void=yes \
+          ac_cv_func_setpgrp_void=yes || cat config.log
 
-      - name: Upload tarball
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-android-tarball
-          path: install/python3-android-arm64.tar.gz
-          retention-days: 30
+        make -j$(nproc)
+        make install
+
+        $STRIP --strip-unneeded $GITHUB_WORKSPACE/install/python-android/bin/python3.11
+        find $GITHUB_WORKSPACE/install/python-android/lib -name "*.so*" -exec $STRIP --strip-unneeded {} \;
+
+    - name: Verify build
+      run: |
+        echo "=========================================="
+        echo "Build Verification"
+        echo "=========================================="
+        ls -lh install/python-android/bin/python3.11
+        file install/python-android/bin/python3.11
+        ls -lh install/python-android/lib/libpython3.11.so
+
+        if strings install/python-android/bin/python3.11 | grep -q "importlib._bootstrap"; then
+          echo "✅ Frozen modules embedded correctly!"
+        else
+          echo "⚠️  Warning: Frozen modules may not be embedded"
+        fi
+
+    - name: Create tarball
+      run: |
+        cd install
+        tar -czf python3-android-arm64.tar.gz python-android/
+
+    - name: Upload complete package
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-android-complete
+        path: install/python-android/
+        retention-days: 30
+
+    - name: Upload tarball
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-android-tarball
+        path: install/python3-android-arm64.tar.gz
+        retention-days: 30
