@@ -67,6 +67,7 @@ jobs:
         export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
         export STRIP="$TOOLCHAIN/bin/llvm-strip"
         export LD="$TOOLCHAIN/bin/ld.lld"
+        export READELF="$TOOLCHAIN/bin/llvm-readelf"
         export PATH="$TOOLCHAIN/bin:$PATH"
 
         # Compile flags
@@ -77,8 +78,8 @@ jobs:
 
         echo "Compiler: $CC"
         $CC --version
-        which readelf
-        readelf --version
+        echo "Readelf: $READELF"
+        $READELF --version
 
         rm -rf build/android install
         mkdir -p build/android install/python-android
@@ -86,9 +87,6 @@ jobs:
 
         echo "=== Starting Configure ==="
         set +e
-
-        # Tell configure to use system readelf
-        export ac_cv_prog_READELF=readelf
 
         ../../Python-3.11.9/configure \
           --prefix=$GITHUB_WORKSPACE/install/python-android \
@@ -103,7 +101,7 @@ jobs:
           ac_cv_header_minix_config_h=no \
           ac_cv_func_getpgrp_void=yes \
           ac_cv_func_setpgrp_void=yes \
-          ac_cv_prog_READELF=readelf
+          READELF=$READELF
         CONFIG_STATUS=$?
         set -e
         echo "Configure exit code: $CONFIG_STATUS"
