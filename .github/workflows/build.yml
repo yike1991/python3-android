@@ -86,6 +86,10 @@ jobs:
 
         echo "=== Starting Configure ==="
         set +e
+
+        # Tell configure to use system readelf
+        export ac_cv_prog_READELF=readelf
+
         ../../Python-3.11.9/configure \
           --prefix=$GITHUB_WORKSPACE/install/python-android \
           --host=$TARGET_TRIPLE \
@@ -98,7 +102,8 @@ jobs:
           --with-system-ffi \
           ac_cv_header_minix_config_h=no \
           ac_cv_func_getpgrp_void=yes \
-          ac_cv_func_setpgrp_void=yes
+          ac_cv_func_setpgrp_void=yes \
+          ac_cv_prog_READELF=readelf
         CONFIG_STATUS=$?
         set -e
         echo "Configure exit code: $CONFIG_STATUS"
