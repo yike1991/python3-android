@@ -19,7 +19,7 @@ jobs:
     - name: Install build dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential pkg-config libssl-dev libffi-dev zlib1g-dev
+        sudo apt-get install -y build-essential pkg-config libssl-dev libffi-dev zlib1g-dev binutils
 
     - name: Download Android NDK r25c
       run: |
@@ -27,12 +27,14 @@ jobs:
         wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
         unzip -q android-ndk-r25c-linux.zip
         echo "ANDROID_NDK_ROOT=$GITHUB_WORKSPACE/android-ndk-r25c" >> $GITHUB_ENV
+        echo "NDK setup complete"
 
     - name: Download Python 3.11.9 source
       run: |
         echo "Downloading Python 3.11.9..."
         wget -q https://www.python.org/ftp/python/3.11.9/Python-3.11.9.tgz
         tar -xzf Python-3.11.9.tgz
+        echo "Python source extracted"
 
     - name: Build host Python 3.11
       run: |
@@ -41,9 +43,9 @@ jobs:
         echo "=========================================="
         mkdir -p build/host
         cd build/host
-        ../../Python-3.11.9/configure --prefix=$GITHUB_WORKSPACE/build/python-host --enable-optimizations > /dev/null
-        make -j$(nproc) > /dev/null
-        make install > /dev/null
+        ../../Python-3.11.9/configure --prefix=$GITHUB_WORKSPACE/build/python-host --quiet
+        make -j$(nproc) --quiet
+        make install --quiet
         echo "PYTHON_FOR_BUILD=$GITHUB_WORKSPACE/build/python-host/bin/python3.11" >> $GITHUB_ENV
         $GITHUB_WORKSPACE/build/python-host/bin/python3.11 --version
 
@@ -67,35 +69,24 @@ jobs:
         export LD="$TOOLCHAIN/bin/ld.lld"
         export PATH="$TOOLCHAIN/bin:$PATH"
 
-        # Set compile flags - WITHOUT defining __ANDROID_API__ to avoid redefinition
+        # Compile flags
         export CFLAGS="-fPIC --sysroot=$TOOLCHAIN/sysroot"
         export CXXFLAGS="$CFLAGS"
         export LDFLAGS="-L$TOOLCHAIN/sysroot/usr/lib -lm"
         export CPPFLAGS="--sysroot=$TOOLCHAIN/sysroot"
 
-        # Pre-set all cache variables to avoid lengthy checks
-        export ac_cv_header_minix_config_h=no
-        export ac_cv_sys_file_offset_bits=no
-        export ac_cv_func_mmap_fixed_mapped=no
-        export ac_cv_func_memrchr=no
-        export ac_cv_func_strlcpy=no
-        export ac_cv_func_strlcat=no
-        export ac_cv_func_mkfifo=no
-        export ac_cv_func_mknod=no
-        export ac_cv_func_mkstemps=no
-        export ac_cv_func_inotify_init=no
-        export ac_cv_func_inotify_init1=no
-        export ac_cv_func_utimensat=no
-        export ac_cv_func_futimens=no
+        echo "Compiler: $CC"
+        $CC --version
+        which readelf
+        readelf --version
 
         rm -rf build/android install
         mkdir -p build/android install/python-android
         cd build/android
 
-        echo "Configuring Python for Android..."
-        # Use --cache-file to skip most checks
+        echo "=== Starting Configure ==="
+        set +e
         ../../Python-3.11.9/configure \
-          --config-cache \
           --prefix=$GITHUB_WORKSPACE/install/python-android \
           --host=$TARGET_TRIPLE \
           --build=x86_64-linux-gnu \
@@ -107,69 +98,68 @@ jobs:
           --with-system-ffi \
           ac_cv_header_minix_config_h=no \
           ac_cv_func_getpgrp_void=yes \
-          ac_cv_func_setpgrp_void=yes \
-          ac_cv_func_getpgrp_void=yes \
-          ac_cv_func_setpgrp_void=yes \
-          || {
-            echo "Configure failed, but continuing..."
-            cat config.log | tail -50
-          }
+          ac_cv_func_setpgrp_void=yes
+        CONFIG_STATUS=$?
+        set -e
+        echo "Configure exit code: $CONFIG_STATUS"
 
-        echo "Building Python..."
-        make -j$(nproc) || {
-          echo "Build failed, checking what was built..."
-          ls -la
-        }
+        if [ $CONFIG_STATUS -ne 0 ]; then
+          echo "Configure failed! Last 100 lines of config.log:"
+          tail -100 config.log
+          exit 1
+        fi
 
-        echo "Installing Python..."
-        make install || {
-          echo "Install may have partial failures, checking..."
-          ls -la $GITHUB_WORKSPACE/install/python-android/bin/ || true
-          ls -la $GITHUB_WORKSPACE/install/python-android/lib/ || true
-        }
+        echo "=== Starting Build ==="
+        make -j$(nproc)
+        echo "Build completed!"
 
-        echo "Stripping binaries..."
-        [ -f "$GITHUB_WORKSPACE/install/python-android/bin/python3.11" ] && $STRIP --strip-unneeded $GITHUB_WORKSPACE/install/python-android/bin/python3.11
-        find $GITHUB_WORKSPACE/install/python-android/lib -name "*.so*" -type f -exec $STRIP --strip-unneeded {} \; 2>/dev/null || true
+        echo "=== Starting Install ==="
+        make install
+        echo "Install completed!"
 
-    - name: Verify build
+        echo "=== Verifying Installation ==="
+        ls -la $GITHUB_WORKSPACE/install/python-android/bin/
+        ls -la $GITHUB_WORKSPACE/install/python-android/lib/
+
+    - name: Verify build and upload
       run: |
         echo "=========================================="
         echo "Build Verification"
         echo "=========================================="
 
-        if [ -f "install/python-android/bin/python3.11" ]; then
-          echo "✅ Python binary exists!"
-          ls -lh install/python-android/bin/python3.11
-          file install/python-android/bin/python3.11
-        else
-          echo "❌ Python binary not found"
+        # Check if build succeeded
+        if [ ! -f "install/python-android/bin/python3.11" ]; then
+          echo "ERROR: Python binary not found!"
+          exit 1
         fi
 
-        if [ -f "install/python-android/lib/libpython3.11.so" ]; then
-          echo "✅ Python shared library exists!"
-          ls -lh install/python-android/lib/libpython3.11.so
-        else
-          echo "❌ Python shared library not found"
+        if [ ! -f "install/python-android/lib/libpython3.11.so" ]; then
+          echo "ERROR: Python shared library not found!"
+          exit 1
         fi
 
-        if [ -d "install/python-android/lib/python3.11" ]; then
-          echo "✅ Standard library exists!"
-          echo "First 20 files:"
-          ls install/python-android/lib/python3.11/ | head -20
+        echo "✅ Python binary:"
+        ls -lh install/python-android/bin/python3.11
+        file install/python-android/bin/python3.11
+
+        echo "✅ Python shared library:"
+        ls -lh install/python-android/lib/libpython3.11.so
+
+        echo "✅ Standard library:"
+        ls install/python-android/lib/python3.11/ | head -20
+
+        # Check for frozen modules
+        if strings install/python-android/bin/python3.11 | grep -q "importlib._bootstrap"; then
+          echo "✅ Frozen modules embedded correctly!"
         else
-          echo "❌ Standard library not found"
+          echo "⚠️  Warning: Frozen modules may not be embedded"
         fi
 
-    - name: Create tarball
-      run: |
-        if [ -d "install/python-android" ]; then
-          cd install
-          tar -czf python3-android-arm64.tar.gz python-android/
-          ls -lh python3-android-arm64.tar.gz
-        else
-          echo "No build output to package"
-        fi
+        # Create tarball
+        cd install
+        tar -czf python3-android-arm64.tar.gz python-android/
+        echo "✅ Tarball created:"
+        ls -lh python3-android-arm64.tar.gz
 
     - name: Upload complete package
       uses: actions/upload-artifact@v4
@@ -177,7 +167,6 @@ jobs:
         name: python-android-complete
         path: install/python-android/
         retention-days: 30
-      if: always()
 
     - name: Upload tarball
       uses: actions/upload-artifact@v4
@@ -185,12 +174,3 @@ jobs:
         name: python-android-tarball
         path: install/python3-android-arm64.tar.gz
         retention-days: 30
-      if: always()
-
-    - name: Upload config log on failure
-      uses: actions/upload-artifact@v4
-      with:
-        name: config-log
-        path: build/android/config.log
-        retention-days: 7
-      if: failure()
